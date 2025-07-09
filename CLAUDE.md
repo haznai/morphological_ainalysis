@@ -33,6 +33,12 @@ This project's innovation:
 ```bash
 # Run the Nemotron reasoning model
 uv run --script run_nemotron.py
+
+# Frontend development (builds and serves on localhost:8000)
+cd frontend && deno task dev
+
+# Production build and serve
+cd frontend && deno task serve
 ```
 
 ## Working with AI Reasoning Models
@@ -45,3 +51,13 @@ uv run --script run_nemotron.py
 ## Test-Time Inference Approach
 
 The general idea is to use AI reasoning like graph traversal - incrementally building parameter combinations while continuously evaluating their viability. The AI can dynamically add parameters, prune unpromising branches, and explore alternative paths based on its reasoning. This avoids exhaustive enumeration by letting the AI guide exploration through the solution space.
+
+## Technical Notes
+
+### Frontend Architecture
+- React + TypeScript + Vite build system
+- Deno runtime with Oak web framework for backend
+- SQLite database for persistence (zwicky_boxes.db)
+- Auto-save functionality with 1-second debounce
+- Everything serves from localhost:8000 in both dev and production
+
