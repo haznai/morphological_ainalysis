@@ -34,3 +34,6 @@ reset-db:
 # start claude code with preferred settings
 claude:
    claude --dangerously-skip-permissions --model="sonnet"
+
+format:
+	uvx ruff format
