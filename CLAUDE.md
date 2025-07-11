@@ -31,14 +31,10 @@ This project's innovation:
 ## Commands
 
 ```bash
-# Run the Nemotron reasoning model
-uv run --script run_nemotron.py
-
-# Frontend development (builds and serves on localhost:8000)
-cd frontend && deno task dev
-
-# Production build and serve
-cd frontend && deno task serve
+# Project uses justfile for all commands
+just --list  # Show available commands
+just dev     # Development server
+just serve   # Production build and serve
 ```
 
 ## Working with AI Reasoning Models
@@ -60,4 +56,11 @@ The general idea is to use AI reasoning like graph traversal - incrementally bui
 - SQLite database for persistence (zwicky_boxes.db)
 - Auto-save functionality with 1-second debounce
 - Everything serves from localhost:8000 in both dev and production
+
+### Vim Mode Integration
+- Comprehensive vim keybindings for spreadsheet navigation (hjkl, gg/G, 0/$)
+- Problem statement integrated as topmost navigation row (row -2)
+- Modal editing: normal mode (navigation), insert mode (editing), search mode (/)
+- Full vim operations: search (/ n N), undo/redo (u Ctrl+r), row/column operations (o/O/dd/A/dc)
+- Problem statement acts as single logical column in vim navigation system
 
