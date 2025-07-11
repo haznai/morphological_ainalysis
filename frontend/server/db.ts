@@ -14,6 +14,7 @@ db.prepare(`
 export interface ZwickyBoxData {
   columns: string[];
   rows: string[][];
+  problem?: string;
 }
 
 export interface ZwickyBoxRecord {
