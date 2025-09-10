@@ -29,13 +29,7 @@ This project's innovation:
 4. **Consider inversions** - Explore what NOT to do as part of the analysis
 
 ## Commands
-
-```bash
-# Project uses justfile for all commands
-just --list  # Show available commands
-just dev     # Development server
-just serve   # Production build and serve
-```
+@justfile
 
 ## Working with AI Reasoning Models
 
