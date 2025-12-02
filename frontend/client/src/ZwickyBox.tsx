@@ -1,5 +1,24 @@
 import { useState, useEffect, useRef } from "react";
 
+// AI Analysis types
+interface CombinationEvaluation {
+  combination: Record<string, string>;
+  verdict: "yes" | "no" | "promising";
+  reasoning: string;
+}
+
+interface AnalysisResult {
+  success: boolean;
+  results: CombinationEvaluation[];
+  totalCombinations: number;
+  summary: {
+    yes: number;
+    no: number;
+    promising: number;
+  };
+  error?: string;
+}
+
 interface VimInfoProps {
   vimEnabled: boolean;
   mode: string;
@@ -164,6 +183,14 @@ export function ZwickyBox() {
    const [undoStack, setUndoStack] = useState<ZwickyBoxData[]>([]);
    const [redoStack, setRedoStack] = useState<ZwickyBoxData[]>([]);
    const maxUndoStackSize = 50;
+
+   // AI Analysis state
+   const [apiKey, setApiKey] = useState<string>("");
+   const [showApiKeyInput, setShowApiKeyInput] = useState(false);
+   const [analyzing, setAnalyzing] = useState(false);
+   const [analysisResults, setAnalysisResults] = useState<CombinationEvaluation[] | null>(null);
+   const [analysisSummary, setAnalysisSummary] = useState<{ yes: number; no: number; promising: number } | null>(null);
+   const [analysisError, setAnalysisError] = useState<string | null>(null);
 
    // Load initial data
    useEffect(() => {
@@ -616,6 +643,91 @@ export function ZwickyBox() {
       }
    };
 
+   // AI Analysis functionality
+   const runAnalysis = async () => {
+      if (!apiKey) {
+         setShowApiKeyInput(true);
+         return;
+      }
+
+      setAnalyzing(true);
+      setAnalysisError(null);
+      setAnalysisResults(null);
+      setAnalysisSummary(null);
+
+      try {
+         const response = await fetch("/api/analyze", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+               apiKey,
+               data: {
+                  problem: data.problem,
+                  columns: data.columns,
+                  rows: data.rows,
+               },
+            }),
+         });
+
+         const result: AnalysisResult = await response.json();
+
+         if (!result.success) {
+            throw new Error(result.error || "Analysis failed");
+         }
+
+         setAnalysisResults(result.results);
+         setAnalysisSummary(result.summary);
+      } catch (error) {
+         console.error("Analysis error:", error);
+         setAnalysisError(error instanceof Error ? error.message : "Analysis failed");
+      } finally {
+         setAnalyzing(false);
+      }
+   };
+
+   // Get cell verdict from analysis results
+   const getCellVerdict = (rowIndex: number, colIndex: number): CombinationEvaluation | null => {
+      if (!analysisResults) return null;
+
+      const colName = data.columns[colIndex];
+      const cellValue = data.rows[rowIndex]?.[colIndex];
+
+      if (!colName || !cellValue) return null;
+
+      // Find evaluations where this cell value is part of the combination
+      const matchingEvals = analysisResults.filter(
+         (r) => r.combination[colName] === cellValue
+      );
+
+      if (matchingEvals.length === 0) return null;
+
+      // Aggregate: if any are promising, show promising; if any yes, show yes; else no
+      const hasPromising = matchingEvals.some((r) => r.verdict === "promising");
+      const hasYes = matchingEvals.some((r) => r.verdict === "yes");
+      const allNo = matchingEvals.every((r) => r.verdict === "no");
+
+      if (hasPromising) {
+         const promisingOne = matchingEvals.find((r) => r.verdict === "promising");
+         return promisingOne || matchingEvals[0];
+      }
+      if (hasYes) {
+         const yesOne = matchingEvals.find((r) => r.verdict === "yes");
+         return yesOne || matchingEvals[0];
+      }
+      if (allNo) {
+         return matchingEvals[0];
+      }
+
+      return matchingEvals[0];
+   };
+
+   // Get cell class based on verdict
+   const getCellVerdictClass = (rowIndex: number, colIndex: number): string => {
+      const verdict = getCellVerdict(rowIndex, colIndex);
+      if (!verdict) return "";
+      return `verdict-${verdict.verdict}`;
+   };
+
    return (
       <div className="zwicky-box">
          <div 
@@ -676,34 +788,40 @@ export function ZwickyBox() {
             <tbody>
                {data.rows.map((row, rowIndex) => (
                   <tr key={rowIndex}>
-                     {row.map((cell, colIndex) => (
-                        <td 
-                           key={colIndex}
-                           className={
-                              vimEnabled && selectedCell.row === rowIndex && selectedCell.col === colIndex 
-                                 ? `selected ${mode}` 
-                                 : ""
-                           }
-                           onClick={() => {
-                              if (vimEnabled) {
-                                 setSelectedCell({ row: rowIndex, col: colIndex });
-                              }
-                           }}
-                        >
-                           <input
-                              type="text"
-                              value={cell}
-                              onChange={(e) =>
-                                 updateCell(rowIndex, colIndex, e.target.value)
-                              }
-                              placeholder="Value"
-                              data-row={rowIndex}
-                              data-col={colIndex}
-                              readOnly={vimEnabled && mode === "normal"}
-                              tabIndex={vimEnabled && mode === "normal" ? -1 : 0}
-                           />
-                        </td>
-                     ))}
+                     {row.map((cell, colIndex) => {
+                        const cellVerdict = getCellVerdict(rowIndex, colIndex);
+                        const verdictClass = getCellVerdictClass(rowIndex, colIndex);
+                        return (
+                           <td
+                              key={colIndex}
+                              className={[
+                                 vimEnabled && selectedCell.row === rowIndex && selectedCell.col === colIndex
+                                    ? `selected ${mode}`
+                                    : "",
+                                 verdictClass,
+                              ].filter(Boolean).join(" ")}
+                              onClick={() => {
+                                 if (vimEnabled) {
+                                    setSelectedCell({ row: rowIndex, col: colIndex });
+                                 }
+                              }}
+                              title={cellVerdict ? `${cellVerdict.verdict.toUpperCase()}: ${cellVerdict.reasoning}` : undefined}
+                           >
+                              <input
+                                 type="text"
+                                 value={cell}
+                                 onChange={(e) =>
+                                    updateCell(rowIndex, colIndex, e.target.value)
+                                 }
+                                 placeholder="Value"
+                                 data-row={rowIndex}
+                                 data-col={colIndex}
+                                 readOnly={vimEnabled && mode === "normal"}
+                                 tabIndex={vimEnabled && mode === "normal" ? -1 : 0}
+                              />
+                           </td>
+                        );
+                     })}
                   </tr>
                ))}
             </tbody>
@@ -725,6 +843,74 @@ export function ZwickyBox() {
                canDeleteRow={data.rows.length > 1}
                saveStatus={saveStatus}
             />
+         )}
+
+         {/* AI Analysis Section */}
+         <div className="ai-analysis-section">
+            <button
+               className="ai-analysis-btn"
+               onClick={runAnalysis}
+               disabled={analyzing}
+            >
+               {analyzing ? "Analyzing..." : "AI Analysis"}
+            </button>
+
+            {!apiKey && (
+               <button
+                  className="api-key-btn"
+                  onClick={() => setShowApiKeyInput(!showApiKeyInput)}
+               >
+                  Set API Key
+               </button>
+            )}
+
+            {apiKey && (
+               <span className="api-key-status">API Key Set</span>
+            )}
+
+            {analysisSummary && (
+               <div className="analysis-summary">
+                  <span className="summary-yes">{analysisSummary.yes} viable</span>
+                  <span className="summary-promising">{analysisSummary.promising} promising</span>
+                  <span className="summary-no">{analysisSummary.no} rejected</span>
+                  <button
+                     className="clear-results-btn"
+                     onClick={() => {
+                        setAnalysisResults(null);
+                        setAnalysisSummary(null);
+                     }}
+                  >
+                     Clear
+                  </button>
+               </div>
+            )}
+
+            {analysisError && (
+               <div className="analysis-error">{analysisError}</div>
+            )}
+         </div>
+
+         {showApiKeyInput && (
+            <div className="api-key-input-container">
+               <input
+                  type="password"
+                  placeholder="Enter OpenAI API Key"
+                  value={apiKey}
+                  onChange={(e) => setApiKey(e.target.value)}
+                  onKeyDown={(e) => {
+                     if (e.key === "Enter" && apiKey) {
+                        setShowApiKeyInput(false);
+                     }
+                  }}
+               />
+               <button
+                  onClick={() => setShowApiKeyInput(false)}
+                  disabled={!apiKey}
+               >
+                  Save
+               </button>
+               <button onClick={() => setShowApiKeyInput(false)}>Cancel</button>
+            </div>
          )}
 
          {vimEnabled && (
