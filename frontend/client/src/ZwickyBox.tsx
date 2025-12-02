@@ -215,6 +215,10 @@ export function ZwickyBox() {
    const [selectedGeneratedColumns, setSelectedGeneratedColumns] = useState<Set<number>>(new Set());
    const [selectedGeneratedValues, setSelectedGeneratedValues] = useState<Set<number>>(new Set());
 
+   // Path visualization state
+   const [viewingPaths, setViewingPaths] = useState<CombinationEvaluation[] | null>(null);
+   const [highlightedPathIndex, setHighlightedPathIndex] = useState<number>(0);
+
    // Load initial data
    useEffect(() => {
       fetch("/api/zwicky-box")
@@ -959,6 +963,41 @@ export function ZwickyBox() {
       return analysisResults.filter((r) => r.combination[lastColName] === cellValue);
    };
 
+   // Check if a cell is part of the currently highlighted path
+   const isCellInHighlightedPath = (rowIndex: number, colIndex: number): boolean => {
+      if (!viewingPaths || viewingPaths.length === 0) return false;
+      const currentPath = viewingPaths[highlightedPathIndex];
+      if (!currentPath) return false;
+
+      const colName = data.columns[colIndex];
+      const cellValue = data.rows[rowIndex]?.[colIndex];
+
+      return currentPath.combination[colName] === cellValue;
+   };
+
+   // Get the verdict class for path highlighting
+   const getPathHighlightClass = (rowIndex: number, colIndex: number): string => {
+      if (!isCellInHighlightedPath(rowIndex, colIndex)) return "";
+      const currentPath = viewingPaths?.[highlightedPathIndex];
+      if (!currentPath) return "";
+      return `path-highlight path-highlight-${currentPath.verdict}`;
+   };
+
+   // Handle clicking on path badges
+   const handlePathClick = (paths: CombinationEvaluation[], verdict: "yes" | "no" | "promising") => {
+      const filtered = paths.filter((p) => p.verdict === verdict);
+      if (filtered.length > 0) {
+         setViewingPaths(filtered);
+         setHighlightedPathIndex(0);
+      }
+   };
+
+   // Close path viewer
+   const closePathViewer = () => {
+      setViewingPaths(null);
+      setHighlightedPathIndex(0);
+   };
+
    return (
       <div className="zwicky-box">
          <div 
@@ -1026,51 +1065,66 @@ export function ZwickyBox() {
 
                   return (
                      <tr key={rowIndex}>
-                        {row.map((cell, colIndex) => (
-                           <td
-                              key={colIndex}
-                              className={
-                                 vimEnabled && selectedCell.row === rowIndex && selectedCell.col === colIndex
-                                    ? `selected ${mode}`
-                                    : ""
-                              }
-                              onClick={() => {
-                                 if (vimEnabled) {
-                                    setSelectedCell({ row: rowIndex, col: colIndex });
-                                 }
-                              }}
-                           >
-                              <input
-                                 type="text"
-                                 value={cell}
-                                 onChange={(e) =>
-                                    updateCell(rowIndex, colIndex, e.target.value)
-                                 }
-                                 placeholder="Value"
-                                 data-row={rowIndex}
-                                 data-col={colIndex}
-                                 readOnly={vimEnabled && mode === "normal"}
-                                 tabIndex={vimEnabled && mode === "normal" ? -1 : 0}
-                              />
-                           </td>
-                        ))}
+                        {row.map((cell, colIndex) => {
+                           const pathHighlight = getPathHighlightClass(rowIndex, colIndex);
+                           return (
+                              <td
+                                 key={colIndex}
+                                 className={[
+                                    vimEnabled && selectedCell.row === rowIndex && selectedCell.col === colIndex
+                                       ? `selected ${mode}`
+                                       : "",
+                                    pathHighlight,
+                                 ].filter(Boolean).join(" ")}
+                                 onClick={() => {
+                                    if (vimEnabled) {
+                                       setSelectedCell({ row: rowIndex, col: colIndex });
+                                    }
+                                 }}
+                              >
+                                 <input
+                                    type="text"
+                                    value={cell}
+                                    onChange={(e) =>
+                                       updateCell(rowIndex, colIndex, e.target.value)
+                                    }
+                                    placeholder="Value"
+                                    data-row={rowIndex}
+                                    data-col={colIndex}
+                                    readOnly={vimEnabled && mode === "normal"}
+                                    tabIndex={vimEnabled && mode === "normal" ? -1 : 0}
+                                 />
+                              </td>
+                           );
+                        })}
                         {analysisResults && (
                            <td className="results-cell">
                               {rowPaths.length > 0 ? (
-                                 <div
-                                    className="path-summary"
-                                    title={rowPaths
-                                       .map((p) => {
-                                          const path = Object.entries(p.combination)
-                                             .map(([k, v]) => `${k}: ${v}`)
-                                             .join(" → ");
-                                          return `[${p.verdict.toUpperCase()}] ${path}\n${p.reasoning}`;
-                                       })
-                                       .join("\n\n")}
-                                 >
-                                    {yesCount > 0 && <span className="path-yes">{yesCount}</span>}
-                                    {promisingCount > 0 && <span className="path-promising">{promisingCount}</span>}
-                                    {noCount > 0 && <span className="path-no">{noCount}</span>}
+                                 <div className="path-summary">
+                                    {yesCount > 0 && (
+                                       <span
+                                          className="path-yes clickable"
+                                          onClick={() => handlePathClick(rowPaths, "yes")}
+                                       >
+                                          {yesCount}
+                                       </span>
+                                    )}
+                                    {promisingCount > 0 && (
+                                       <span
+                                          className="path-promising clickable"
+                                          onClick={() => handlePathClick(rowPaths, "promising")}
+                                       >
+                                          {promisingCount}
+                                       </span>
+                                    )}
+                                    {noCount > 0 && (
+                                       <span
+                                          className="path-no clickable"
+                                          onClick={() => handlePathClick(rowPaths, "no")}
+                                       >
+                                          {noCount}
+                                       </span>
+                                    )}
                                  </div>
                               ) : (
                                  <span className="path-empty">-</span>
@@ -1329,6 +1383,53 @@ export function ZwickyBox() {
          )}
 
          {showHelp && <HelpOverlay onClose={() => setShowHelp(false)} />}
+
+         {/* Path Viewer Panel */}
+         {viewingPaths && viewingPaths.length > 0 && (
+            <div className="path-viewer">
+               <div className="path-viewer-header">
+                  <h4>
+                     Path {highlightedPathIndex + 1} of {viewingPaths.length}
+                     <span className={`verdict-badge ${viewingPaths[highlightedPathIndex].verdict}`}>
+                        {viewingPaths[highlightedPathIndex].verdict}
+                     </span>
+                  </h4>
+                  <button className="path-viewer-close" onClick={closePathViewer}>×</button>
+               </div>
+
+               <div className="path-viewer-combination">
+                  {Object.entries(viewingPaths[highlightedPathIndex].combination).map(([col, val]) => (
+                     <span key={col} className="combo-item">
+                        <strong>{col}:</strong> {val}
+                     </span>
+                  ))}
+               </div>
+
+               <div className="path-viewer-reasoning">
+                  {viewingPaths[highlightedPathIndex].reasoning}
+               </div>
+
+               {viewingPaths.length > 1 && (
+                  <div className="path-viewer-nav">
+                     <button
+                        onClick={() => setHighlightedPathIndex((prev) => Math.max(0, prev - 1))}
+                        disabled={highlightedPathIndex === 0}
+                     >
+                        Prev
+                     </button>
+                     <span className="counter">
+                        {highlightedPathIndex + 1} / {viewingPaths.length}
+                     </span>
+                     <button
+                        onClick={() => setHighlightedPathIndex((prev) => Math.min(viewingPaths.length - 1, prev + 1))}
+                        disabled={highlightedPathIndex === viewingPaths.length - 1}
+                     >
+                        Next
+                     </button>
+                  </div>
+               )}
+            </div>
+         )}
       </div>
    );
 }
