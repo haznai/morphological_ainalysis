@@ -1,6 +1,13 @@
 import { Router } from "@oak/oak";
 import { getLatestBox, saveBox, updateBox } from "./db.ts";
-import { analyzeAllCombinations, type CombinationEvaluation } from "./openai.ts";
+import {
+  analyzeAllCombinations,
+  generateColumns,
+  generateValues,
+  type CombinationEvaluation,
+  type GeneratedColumn,
+  type GeneratedValue,
+} from "./openai.ts";
 
 export const apiRouter = new Router();
 
@@ -177,6 +184,91 @@ apiRouter.post("/api/analyze", async (ctx) => {
     ctx.response.body = {
       success: false,
       error: error instanceof Error ? error.message : 'Failed to analyze combinations'
+    };
+  }
+});
+
+// ============================================================================
+// GENERATION MODE ENDPOINTS
+// ============================================================================
+
+// Generate new column suggestions
+apiRouter.post("/api/generate/columns", async (ctx) => {
+  try {
+    const body = await ctx.request.body.json();
+
+    if (!body.apiKey) {
+      ctx.response.status = 400;
+      ctx.response.body = { success: false, error: 'Missing API key' };
+      return;
+    }
+
+    if (!body.problem && (!body.existingColumns || body.existingColumns.length === 0)) {
+      ctx.response.status = 400;
+      ctx.response.body = { success: false, error: 'Need either a problem statement or existing columns for context' };
+      return;
+    }
+
+    const columns: GeneratedColumn[] = await generateColumns({
+      problem: body.problem || "",
+      existingColumns: body.existingColumns || [],
+      rows: body.rows || [],
+      additionalContext: body.additionalContext,
+      count: body.count || 3,
+      apiKey: body.apiKey,
+    });
+
+    ctx.response.body = {
+      success: true,
+      columns,
+    };
+  } catch (error) {
+    console.error('Error generating columns:', error);
+    ctx.response.status = 500;
+    ctx.response.body = {
+      success: false,
+      error: error instanceof Error ? error.message : 'Failed to generate columns'
+    };
+  }
+});
+
+// Generate new value suggestions for a column
+apiRouter.post("/api/generate/values", async (ctx) => {
+  try {
+    const body = await ctx.request.body.json();
+
+    if (!body.apiKey) {
+      ctx.response.status = 400;
+      ctx.response.body = { success: false, error: 'Missing API key' };
+      return;
+    }
+
+    if (!body.targetColumn) {
+      ctx.response.status = 400;
+      ctx.response.body = { success: false, error: 'Missing target column' };
+      return;
+    }
+
+    const values: GeneratedValue[] = await generateValues({
+      problem: body.problem || "",
+      columns: body.columns || [],
+      rows: body.rows || [],
+      targetColumn: body.targetColumn,
+      additionalContext: body.additionalContext,
+      count: body.count || 5,
+      apiKey: body.apiKey,
+    });
+
+    ctx.response.body = {
+      success: true,
+      values,
+    };
+  } catch (error) {
+    console.error('Error generating values:', error);
+    ctx.response.status = 500;
+    ctx.response.body = {
+      success: false,
+      error: error instanceof Error ? error.message : 'Failed to generate values'
     };
   }
 });

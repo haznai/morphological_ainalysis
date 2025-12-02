@@ -19,6 +19,18 @@ interface AnalysisResult {
   error?: string;
 }
 
+// AI Generation types
+interface GeneratedColumn {
+  name: string;
+  description: string;
+  suggestedValues: string[];
+}
+
+interface GeneratedValue {
+  value: string;
+  rationale: string;
+}
+
 interface VimInfoProps {
   vimEnabled: boolean;
   mode: string;
@@ -191,6 +203,15 @@ export function ZwickyBox() {
    const [analysisResults, setAnalysisResults] = useState<CombinationEvaluation[] | null>(null);
    const [analysisSummary, setAnalysisSummary] = useState<{ yes: number; no: number; promising: number } | null>(null);
    const [analysisError, setAnalysisError] = useState<string | null>(null);
+
+   // AI Generation state
+   const [generating, setGenerating] = useState(false);
+   const [generationError, setGenerationError] = useState<string | null>(null);
+   const [showGenerateModal, setShowGenerateModal] = useState<"columns" | "values" | null>(null);
+   const [generatedColumns, setGeneratedColumns] = useState<GeneratedColumn[]>([]);
+   const [generatedValues, setGeneratedValues] = useState<GeneratedValue[]>([]);
+   const [targetColumnForValues, setTargetColumnForValues] = useState<string>("");
+   const [additionalContext, setAdditionalContext] = useState<string>("");
 
    // Load initial data
    useEffect(() => {
@@ -728,6 +749,118 @@ export function ZwickyBox() {
       return `verdict-${verdict.verdict}`;
    };
 
+   // AI Generation: suggest new columns
+   const generateNewColumns = async () => {
+      if (!apiKey) {
+         setShowApiKeyInput(true);
+         return;
+      }
+
+      setGenerating(true);
+      setGenerationError(null);
+      setGeneratedColumns([]);
+
+      try {
+         const response = await fetch("/api/generate/columns", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+               apiKey,
+               problem: data.problem,
+               existingColumns: data.columns,
+               rows: data.rows,
+               additionalContext: additionalContext || undefined,
+               count: 3,
+            }),
+         });
+
+         const result = await response.json();
+
+         if (!result.success) {
+            throw new Error(result.error || "Generation failed");
+         }
+
+         setGeneratedColumns(result.columns);
+      } catch (error) {
+         console.error("Generation error:", error);
+         setGenerationError(error instanceof Error ? error.message : "Generation failed");
+      } finally {
+         setGenerating(false);
+      }
+   };
+
+   // AI Generation: suggest new values for a column
+   const generateNewValues = async (columnName: string) => {
+      if (!apiKey) {
+         setShowApiKeyInput(true);
+         return;
+      }
+
+      setGenerating(true);
+      setGenerationError(null);
+      setGeneratedValues([]);
+      setTargetColumnForValues(columnName);
+
+      try {
+         const response = await fetch("/api/generate/values", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+               apiKey,
+               problem: data.problem,
+               columns: data.columns,
+               rows: data.rows,
+               targetColumn: columnName,
+               additionalContext: additionalContext || undefined,
+               count: 5,
+            }),
+         });
+
+         const result = await response.json();
+
+         if (!result.success) {
+            throw new Error(result.error || "Generation failed");
+         }
+
+         setGeneratedValues(result.values);
+      } catch (error) {
+         console.error("Generation error:", error);
+         setGenerationError(error instanceof Error ? error.message : "Generation failed");
+      } finally {
+         setGenerating(false);
+      }
+   };
+
+   // Accept a generated column
+   const acceptGeneratedColumn = (column: GeneratedColumn) => {
+      saveStateForUndo();
+      const newColumns = [...data.columns, column.name];
+      const newRows = data.rows.map((row, idx) => [
+         ...row,
+         column.suggestedValues[idx] || "",
+      ]);
+      // Add extra rows if suggestedValues has more
+      while (newRows.length < column.suggestedValues.length) {
+         const emptyRow = new Array(data.columns.length).fill("");
+         emptyRow.push(column.suggestedValues[newRows.length]);
+         newRows.push(emptyRow);
+      }
+      setData({ ...data, columns: newColumns, rows: newRows });
+      setGeneratedColumns((prev) => prev.filter((c) => c.name !== column.name));
+   };
+
+   // Accept a generated value
+   const acceptGeneratedValue = (value: GeneratedValue) => {
+      const colIndex = data.columns.indexOf(targetColumnForValues);
+      if (colIndex === -1) return;
+
+      saveStateForUndo();
+      const newRow = new Array(data.columns.length).fill("");
+      newRow[colIndex] = value.value;
+      setData({ ...data, rows: [...data.rows, newRow] });
+      setGeneratedValues((prev) => prev.filter((v) => v.value !== value.value));
+   };
+
    return (
       <div className="zwicky-box">
          <div 
@@ -845,50 +978,171 @@ export function ZwickyBox() {
             />
          )}
 
-         {/* AI Analysis Section */}
-         <div className="ai-analysis-section">
-            <button
-               className="ai-analysis-btn"
-               onClick={runAnalysis}
-               disabled={analyzing}
-            >
-               {analyzing ? "Analyzing..." : "AI Analysis"}
-            </button>
-
-            {!apiKey && (
+         {/* AI Section */}
+         <div className="ai-section">
+            <div className="ai-section-row">
+               <span className="ai-section-label">Generate:</span>
                <button
-                  className="api-key-btn"
-                  onClick={() => setShowApiKeyInput(!showApiKeyInput)}
+                  className="ai-generate-btn"
+                  onClick={() => setShowGenerateModal("columns")}
+                  disabled={generating}
                >
-                  Set API Key
+                  + Dimensions
                </button>
-            )}
+               <button
+                  className="ai-generate-btn"
+                  onClick={() => setShowGenerateModal("values")}
+                  disabled={generating || data.columns.length === 0}
+               >
+                  + Values
+               </button>
+            </div>
 
-            {apiKey && (
-               <span className="api-key-status">API Key Set</span>
-            )}
+            <div className="ai-section-row">
+               <span className="ai-section-label">Evaluate:</span>
+               <button
+                  className="ai-analysis-btn"
+                  onClick={runAnalysis}
+                  disabled={analyzing}
+               >
+                  {analyzing ? "Analyzing..." : "AI Analysis"}
+               </button>
 
-            {analysisSummary && (
-               <div className="analysis-summary">
-                  <span className="summary-yes">{analysisSummary.yes} viable</span>
-                  <span className="summary-promising">{analysisSummary.promising} promising</span>
-                  <span className="summary-no">{analysisSummary.no} rejected</span>
+               {analysisSummary && (
+                  <div className="analysis-summary">
+                     <span className="summary-yes">{analysisSummary.yes} viable</span>
+                     <span className="summary-promising">{analysisSummary.promising} promising</span>
+                     <span className="summary-no">{analysisSummary.no} rejected</span>
+                     <button
+                        className="clear-results-btn"
+                        onClick={() => {
+                           setAnalysisResults(null);
+                           setAnalysisSummary(null);
+                        }}
+                     >
+                        Clear
+                     </button>
+                  </div>
+               )}
+            </div>
+
+            <div className="ai-section-row">
+               {!apiKey && (
                   <button
-                     className="clear-results-btn"
-                     onClick={() => {
-                        setAnalysisResults(null);
-                        setAnalysisSummary(null);
-                     }}
+                     className="api-key-btn"
+                     onClick={() => setShowApiKeyInput(!showApiKeyInput)}
                   >
-                     Clear
+                     Set API Key
                   </button>
-               </div>
-            )}
+               )}
+               {apiKey && (
+                  <span className="api-key-status">API Key Set</span>
+               )}
+            </div>
 
-            {analysisError && (
-               <div className="analysis-error">{analysisError}</div>
+            {(analysisError || generationError) && (
+               <div className="analysis-error">{analysisError || generationError}</div>
             )}
          </div>
+
+         {/* Generation Modal */}
+         {showGenerateModal && (
+            <>
+               <div className="generate-modal-backdrop" onClick={() => setShowGenerateModal(null)} />
+               <div className="generate-modal">
+                  <button className="close" onClick={() => setShowGenerateModal(null)}>×</button>
+                  <h3>
+                     {showGenerateModal === "columns" ? "AI: Suggest New Dimensions" : "AI: Suggest New Values"}
+                  </h3>
+
+                  {showGenerateModal === "values" && (
+                     <div className="generate-modal-field">
+                        <label>For dimension:</label>
+                        <select
+                           value={targetColumnForValues}
+                           onChange={(e) => setTargetColumnForValues(e.target.value)}
+                        >
+                           <option value="">Select a dimension...</option>
+                           {data.columns.map((col, idx) => (
+                              <option key={idx} value={col}>{col}</option>
+                           ))}
+                        </select>
+                     </div>
+                  )}
+
+                  <div className="generate-modal-field">
+                     <label>Additional context (optional):</label>
+                     <textarea
+                        value={additionalContext}
+                        onChange={(e) => setAdditionalContext(e.target.value)}
+                        placeholder="Any extra info to guide the AI (constraints, preferences, domain knowledge...)"
+                        rows={3}
+                     />
+                  </div>
+
+                  <button
+                     className="generate-btn"
+                     onClick={() => {
+                        if (showGenerateModal === "columns") {
+                           generateNewColumns();
+                        } else if (targetColumnForValues) {
+                           generateNewValues(targetColumnForValues);
+                        }
+                     }}
+                     disabled={generating || (showGenerateModal === "values" && !targetColumnForValues)}
+                  >
+                     {generating ? "Generating..." : "Generate Suggestions"}
+                  </button>
+
+                  {/* Generated Columns */}
+                  {generatedColumns.length > 0 && (
+                     <div className="generated-items">
+                        <h4>Suggested Dimensions:</h4>
+                        {generatedColumns.map((col, idx) => (
+                           <div key={idx} className="generated-item">
+                              <div className="generated-item-header">
+                                 <strong>{col.name}</strong>
+                                 <button
+                                    className="accept-btn"
+                                    onClick={() => acceptGeneratedColumn(col)}
+                                 >
+                                    Add
+                                 </button>
+                              </div>
+                              <p className="generated-item-desc">{col.description}</p>
+                              {col.suggestedValues.length > 0 && (
+                                 <div className="generated-item-values">
+                                    Values: {col.suggestedValues.join(", ")}
+                                 </div>
+                              )}
+                           </div>
+                        ))}
+                     </div>
+                  )}
+
+                  {/* Generated Values */}
+                  {generatedValues.length > 0 && (
+                     <div className="generated-items">
+                        <h4>Suggested Values for "{targetColumnForValues}":</h4>
+                        {generatedValues.map((val, idx) => (
+                           <div key={idx} className="generated-item">
+                              <div className="generated-item-header">
+                                 <strong>{val.value}</strong>
+                                 <button
+                                    className="accept-btn"
+                                    onClick={() => acceptGeneratedValue(val)}
+                                 >
+                                    Add
+                                 </button>
+                              </div>
+                              <p className="generated-item-desc">{val.rationale}</p>
+                           </div>
+                        ))}
+                     </div>
+                  )}
+               </div>
+            </>
+         )}
 
          {showApiKeyInput && (
             <div className="api-key-input-container">

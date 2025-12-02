@@ -177,3 +177,215 @@ export async function analyzeAllCombinations(
 
   return results;
 }
+
+// ============================================================================
+// GENERATION MODE - AI suggests new parameters and values
+// ============================================================================
+
+export interface GenerateColumnsRequest {
+  problem: string;
+  existingColumns: string[];
+  rows: string[][];
+  additionalContext?: string;
+  count?: number;
+  apiKey: string;
+}
+
+export interface GenerateValuesRequest {
+  problem: string;
+  columns: string[];
+  rows: string[][];
+  targetColumn: string;
+  additionalContext?: string;
+  count?: number;
+  apiKey: string;
+}
+
+export interface GeneratedColumn {
+  name: string;
+  description: string;
+  suggestedValues: string[];
+}
+
+export interface GeneratedValue {
+  value: string;
+  rationale: string;
+}
+
+// Build context description for generation prompts
+function buildZwickyContext(problem: string, columns: string[], rows: string[][]): string {
+  let context = `## Problem/Goal\n${problem || "No specific problem defined yet"}\n\n`;
+
+  if (columns.length > 0) {
+    context += "## Current Zwicky Box Dimensions\n\n";
+    for (let colIndex = 0; colIndex < columns.length; colIndex++) {
+      const colName = columns[colIndex];
+      const values = rows.map((row) => row[colIndex]).filter((v) => v && v.trim() !== "");
+      context += `### ${colName}\n`;
+      if (values.length > 0) {
+        context += values.map((v) => `- ${v}`).join("\n") + "\n\n";
+      } else {
+        context += "(no values yet)\n\n";
+      }
+    }
+  } else {
+    context += "## Current State\nNo dimensions defined yet - starting fresh.\n\n";
+  }
+
+  return context;
+}
+
+// Generate new column/parameter suggestions
+export async function generateColumns(
+  request: GenerateColumnsRequest
+): Promise<GeneratedColumn[]> {
+  const { problem, existingColumns, rows, additionalContext, count = 3, apiKey } = request;
+
+  const zwickyContext = buildZwickyContext(problem, existingColumns, rows);
+
+  const systemPrompt = `You are an expert in morphological analysis (Zwicky box method) - a structured approach to exploring solution spaces by breaking problems into independent dimensions/parameters.
+
+${zwickyContext}
+
+Your task: Suggest NEW dimensions/parameters that would be valuable to add to this morphological analysis.
+
+Guidelines for good dimensions:
+- Each dimension should be INDEPENDENT from existing ones (not redundant)
+- Dimensions should be RELEVANT to solving the problem
+- Think about: Who? What? How? Where? When? Why? With what resources?
+- Consider: technical approaches, business models, user segments, delivery methods, constraints, enablers
+- Look for non-obvious angles that could unlock creative solutions
+- Consider inversions: what NOT to do, what to avoid, anti-patterns
+
+${additionalContext ? `## Additional Context from User\n${additionalContext}\n\n` : ""}
+
+Respond with valid JSON in this exact format:
+{
+  "columns": [
+    {
+      "name": "Dimension Name",
+      "description": "Why this dimension matters for the problem",
+      "suggestedValues": ["value1", "value2", "value3"]
+    }
+  ]
+}
+
+Suggest ${count} new dimensions. Be creative but practical.`;
+
+  const messages: OpenAIMessage[] = [
+    { role: "system", content: systemPrompt },
+    { role: "user", content: "Suggest new dimensions for this morphological analysis." },
+  ];
+
+  try {
+    const response = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        model: "gpt-4o-mini",
+        messages,
+        temperature: 0.8, // Higher temperature for creativity
+        max_tokens: 1000,
+        response_format: { type: "json_object" },
+      }),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`OpenAI API error: ${response.status} - ${errorText}`);
+    }
+
+    const data: OpenAIResponse = await response.json();
+    const content = data.choices[0]?.message?.content || "{}";
+    const parsed = JSON.parse(content);
+
+    return parsed.columns || [];
+  } catch (error) {
+    console.error("Error generating columns:", error);
+    throw error;
+  }
+}
+
+// Generate new value suggestions for a specific column
+export async function generateValues(
+  request: GenerateValuesRequest
+): Promise<GeneratedValue[]> {
+  const { problem, columns, rows, targetColumn, additionalContext, count = 5, apiKey } = request;
+
+  const zwickyContext = buildZwickyContext(problem, columns, rows);
+
+  // Find existing values for target column
+  const colIndex = columns.indexOf(targetColumn);
+  const existingValues = colIndex >= 0
+    ? rows.map((row) => row[colIndex]).filter((v) => v && v.trim() !== "")
+    : [];
+
+  const systemPrompt = `You are an expert in morphological analysis (Zwicky box method).
+
+${zwickyContext}
+
+Your task: Suggest NEW values for the dimension "${targetColumn}".
+
+${existingValues.length > 0 ? `Existing values for this dimension:\n${existingValues.map(v => `- ${v}`).join("\n")}\n\n` : ""}
+
+Guidelines for good values:
+- Values should be DISTINCT from existing ones
+- Values should be MUTUALLY EXCLUSIVE where possible (different approaches, not variations)
+- Consider the full spectrum: conventional to unconventional, simple to complex
+- Think about extremes, opposites, and edge cases
+- Consider what competitors or other industries might do
+- Include at least one "wild card" unconventional option
+
+${additionalContext ? `## Additional Context from User\n${additionalContext}\n\n` : ""}
+
+Respond with valid JSON in this exact format:
+{
+  "values": [
+    {
+      "value": "The value to add",
+      "rationale": "Brief explanation of why this value is worth considering"
+    }
+  ]
+}
+
+Suggest ${count} new values. Be creative but relevant to the problem.`;
+
+  const messages: OpenAIMessage[] = [
+    { role: "system", content: systemPrompt },
+    { role: "user", content: `Suggest new values for the "${targetColumn}" dimension.` },
+  ];
+
+  try {
+    const response = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        model: "gpt-4o-mini",
+        messages,
+        temperature: 0.8,
+        max_tokens: 800,
+        response_format: { type: "json_object" },
+      }),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`OpenAI API error: ${response.status} - ${errorText}`);
+    }
+
+    const data: OpenAIResponse = await response.json();
+    const content = data.choices[0]?.message?.content || "{}";
+    const parsed = JSON.parse(content);
+
+    return parsed.values || [];
+  } catch (error) {
+    console.error("Error generating values:", error);
+    throw error;
+  }
+}
