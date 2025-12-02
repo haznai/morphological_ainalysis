@@ -212,6 +212,8 @@ export function ZwickyBox() {
    const [generatedValues, setGeneratedValues] = useState<GeneratedValue[]>([]);
    const [targetColumnForValues, setTargetColumnForValues] = useState<string>("");
    const [additionalContext, setAdditionalContext] = useState<string>("");
+   const [selectedGeneratedColumns, setSelectedGeneratedColumns] = useState<Set<number>>(new Set());
+   const [selectedGeneratedValues, setSelectedGeneratedValues] = useState<Set<number>>(new Set());
 
    // Load initial data
    useEffect(() => {
@@ -849,16 +851,112 @@ export function ZwickyBox() {
       setGeneratedColumns((prev) => prev.filter((c) => c.name !== column.name));
    };
 
-   // Accept a generated value
+   // Find the freest row for a column (row with empty cell in that column)
+   const findFreestRow = (colIndex: number): number => {
+      for (let rowIndex = 0; rowIndex < data.rows.length; rowIndex++) {
+         if (!data.rows[rowIndex][colIndex] || data.rows[rowIndex][colIndex].trim() === "") {
+            return rowIndex;
+         }
+      }
+      return -1; // No free row found
+   };
+
+   // Accept a generated value - uses freest row first
    const acceptGeneratedValue = (value: GeneratedValue) => {
       const colIndex = data.columns.indexOf(targetColumnForValues);
       if (colIndex === -1) return;
 
       saveStateForUndo();
-      const newRow = new Array(data.columns.length).fill("");
-      newRow[colIndex] = value.value;
-      setData({ ...data, rows: [...data.rows, newRow] });
+      const freeRowIndex = findFreestRow(colIndex);
+
+      if (freeRowIndex >= 0) {
+         // Use existing free row
+         const newRows = data.rows.map((row, idx) =>
+            idx === freeRowIndex
+               ? row.map((cell, cIdx) => (cIdx === colIndex ? value.value : cell))
+               : row
+         );
+         setData({ ...data, rows: newRows });
+      } else {
+         // Create new row
+         const newRow = new Array(data.columns.length).fill("");
+         newRow[colIndex] = value.value;
+         setData({ ...data, rows: [...data.rows, newRow] });
+      }
       setGeneratedValues((prev) => prev.filter((v) => v.value !== value.value));
+      setSelectedGeneratedValues((prev) => {
+         const newSet = new Set(prev);
+         const idx = generatedValues.findIndex((v) => v.value === value.value);
+         newSet.delete(idx);
+         return newSet;
+      });
+   };
+
+   // Bulk accept selected columns
+   const acceptSelectedColumns = () => {
+      if (selectedGeneratedColumns.size === 0) return;
+      saveStateForUndo();
+
+      let newColumns = [...data.columns];
+      let newRows = data.rows.map((row) => [...row]);
+
+      const columnsToAdd = generatedColumns.filter((_, idx) => selectedGeneratedColumns.has(idx));
+      for (const column of columnsToAdd) {
+         newColumns.push(column.name);
+         newRows = newRows.map((row, idx) => [...row, column.suggestedValues[idx] || ""]);
+         while (newRows.length < column.suggestedValues.length) {
+            const emptyRow = new Array(newColumns.length - 1).fill("");
+            emptyRow.push(column.suggestedValues[newRows.length]);
+            newRows.push(emptyRow);
+         }
+      }
+
+      setData({ ...data, columns: newColumns, rows: newRows });
+      setGeneratedColumns((prev) => prev.filter((_, idx) => !selectedGeneratedColumns.has(idx)));
+      setSelectedGeneratedColumns(new Set());
+   };
+
+   // Bulk accept selected values
+   const acceptSelectedValues = () => {
+      if (selectedGeneratedValues.size === 0) return;
+      const colIndex = data.columns.indexOf(targetColumnForValues);
+      if (colIndex === -1) return;
+
+      saveStateForUndo();
+      let newRows = data.rows.map((row) => [...row]);
+      const valuesToAdd = generatedValues.filter((_, idx) => selectedGeneratedValues.has(idx));
+
+      for (const val of valuesToAdd) {
+         let freeRowIndex = -1;
+         for (let i = 0; i < newRows.length; i++) {
+            if (!newRows[i][colIndex] || newRows[i][colIndex].trim() === "") {
+               freeRowIndex = i;
+               break;
+            }
+         }
+         if (freeRowIndex >= 0) {
+            newRows[freeRowIndex][colIndex] = val.value;
+         } else {
+            const newRow = new Array(data.columns.length).fill("");
+            newRow[colIndex] = val.value;
+            newRows.push(newRow);
+         }
+      }
+
+      setData({ ...data, rows: newRows });
+      setGeneratedValues((prev) => prev.filter((_, idx) => !selectedGeneratedValues.has(idx)));
+      setSelectedGeneratedValues(new Set());
+   };
+
+   // Get paths/combinations for a row's last column value
+   const getRowPaths = (rowIndex: number): CombinationEvaluation[] => {
+      if (!analysisResults) return [];
+      const lastColIndex = data.columns.length - 1;
+      const lastColName = data.columns[lastColIndex];
+      const cellValue = data.rows[rowIndex]?.[lastColIndex];
+      if (!cellValue) return [];
+
+      return analysisResults.filter((r) => r.combination[lastColName] === cellValue);
    };
 
    return (
@@ -889,11 +987,11 @@ export function ZwickyBox() {
             <thead>
                <tr>
                   {data.columns.map((col, colIndex) => (
-                     <th 
+                     <th
                         key={colIndex}
                         className={
-                           vimEnabled && selectedCell.row === -1 && selectedCell.col === colIndex 
-                              ? `selected ${mode}` 
+                           vimEnabled && selectedCell.row === -1 && selectedCell.col === colIndex
+                              ? `selected ${mode}`
                               : ""
                         }
                         onClick={() => {
@@ -916,29 +1014,31 @@ export function ZwickyBox() {
                         />
                      </th>
                   ))}
+                  {analysisResults && <th className="results-header">Paths</th>}
                </tr>
             </thead>
             <tbody>
-               {data.rows.map((row, rowIndex) => (
-                  <tr key={rowIndex}>
-                     {row.map((cell, colIndex) => {
-                        const cellVerdict = getCellVerdict(rowIndex, colIndex);
-                        const verdictClass = getCellVerdictClass(rowIndex, colIndex);
-                        return (
+               {data.rows.map((row, rowIndex) => {
+                  const rowPaths = getRowPaths(rowIndex);
+                  const yesCount = rowPaths.filter((p) => p.verdict === "yes").length;
+                  const promisingCount = rowPaths.filter((p) => p.verdict === "promising").length;
+                  const noCount = rowPaths.filter((p) => p.verdict === "no").length;
+
+                  return (
+                     <tr key={rowIndex}>
+                        {row.map((cell, colIndex) => (
                            <td
                               key={colIndex}
-                              className={[
+                              className={
                                  vimEnabled && selectedCell.row === rowIndex && selectedCell.col === colIndex
                                     ? `selected ${mode}`
-                                    : "",
-                                 verdictClass,
-                              ].filter(Boolean).join(" ")}
+                                    : ""
+                              }
                               onClick={() => {
                                  if (vimEnabled) {
                                     setSelectedCell({ row: rowIndex, col: colIndex });
                                  }
                               }}
-                              title={cellVerdict ? `${cellVerdict.verdict.toUpperCase()}: ${cellVerdict.reasoning}` : undefined}
                            >
                               <input
                                  type="text"
@@ -953,10 +1053,33 @@ export function ZwickyBox() {
                                  tabIndex={vimEnabled && mode === "normal" ? -1 : 0}
                               />
                            </td>
-                        );
-                     })}
-                  </tr>
-               ))}
+                        ))}
+                        {analysisResults && (
+                           <td className="results-cell">
+                              {rowPaths.length > 0 ? (
+                                 <div
+                                    className="path-summary"
+                                    title={rowPaths
+                                       .map((p) => {
+                                          const path = Object.entries(p.combination)
+                                             .map(([k, v]) => `${k}: ${v}`)
+                                             .join(" → ");
+                                          return `[${p.verdict.toUpperCase()}] ${path}\n${p.reasoning}`;
+                                       })
+                                       .join("\n\n")}
+                                 >
+                                    {yesCount > 0 && <span className="path-yes">{yesCount}</span>}
+                                    {promisingCount > 0 && <span className="path-promising">{promisingCount}</span>}
+                                    {noCount > 0 && <span className="path-no">{noCount}</span>}
+                                 </div>
+                              ) : (
+                                 <span className="path-empty">-</span>
+                              )}
+                           </td>
+                        )}
+                     </tr>
+                  );
+               })}
             </tbody>
          </table>
          
@@ -978,168 +1101,159 @@ export function ZwickyBox() {
             />
          )}
 
-         {/* AI Section */}
+         {/* AI Section - simplified */}
          <div className="ai-section">
-            <div className="ai-section-row">
-               <span className="ai-section-label">Generate:</span>
-               <button
-                  className="ai-generate-btn"
-                  onClick={() => setShowGenerateModal("columns")}
-                  disabled={generating}
-               >
+            <div className="ai-row">
+               <button onClick={() => setShowGenerateModal("columns")} disabled={generating}>
                   + Dimensions
                </button>
-               <button
-                  className="ai-generate-btn"
-                  onClick={() => setShowGenerateModal("values")}
-                  disabled={generating || data.columns.length === 0}
-               >
+               <button onClick={() => setShowGenerateModal("values")} disabled={generating || data.columns.length === 0}>
                   + Values
                </button>
-            </div>
-
-            <div className="ai-section-row">
-               <span className="ai-section-label">Evaluate:</span>
-               <button
-                  className="ai-analysis-btn"
-                  onClick={runAnalysis}
-                  disabled={analyzing}
-               >
-                  {analyzing ? "Analyzing..." : "AI Analysis"}
+               <button onClick={runAnalysis} disabled={analyzing}>
+                  {analyzing ? "Analyzing..." : "Evaluate All"}
                </button>
-
                {analysisSummary && (
-                  <div className="analysis-summary">
-                     <span className="summary-yes">{analysisSummary.yes} viable</span>
-                     <span className="summary-promising">{analysisSummary.promising} promising</span>
-                     <span className="summary-no">{analysisSummary.no} rejected</span>
-                     <button
-                        className="clear-results-btn"
-                        onClick={() => {
-                           setAnalysisResults(null);
-                           setAnalysisSummary(null);
-                        }}
-                     >
-                        Clear
+                  <>
+                     <span className="badge yes">{analysisSummary.yes}</span>
+                     <span className="badge promising">{analysisSummary.promising}</span>
+                     <span className="badge no">{analysisSummary.no}</span>
+                     <button className="text-btn" onClick={() => { setAnalysisResults(null); setAnalysisSummary(null); }}>
+                        clear
                      </button>
-                  </div>
+                  </>
                )}
-            </div>
-
-            <div className="ai-section-row">
-               {!apiKey && (
-                  <button
-                     className="api-key-btn"
-                     onClick={() => setShowApiKeyInput(!showApiKeyInput)}
-                  >
-                     Set API Key
+               <span className="spacer" />
+               {!apiKey ? (
+                  <button className="text-btn" onClick={() => setShowApiKeyInput(!showApiKeyInput)}>
+                     set api key
                   </button>
-               )}
-               {apiKey && (
-                  <span className="api-key-status">API Key Set</span>
+               ) : (
+                  <span className="api-set">key set</span>
                )}
             </div>
-
             {(analysisError || generationError) && (
-               <div className="analysis-error">{analysisError || generationError}</div>
+               <div className="error-msg">{analysisError || generationError}</div>
             )}
          </div>
 
          {/* Generation Modal */}
          {showGenerateModal && (
             <>
-               <div className="generate-modal-backdrop" onClick={() => setShowGenerateModal(null)} />
-               <div className="generate-modal">
-                  <button className="close" onClick={() => setShowGenerateModal(null)}>×</button>
-                  <h3>
-                     {showGenerateModal === "columns" ? "AI: Suggest New Dimensions" : "AI: Suggest New Values"}
-                  </h3>
-
-                  {showGenerateModal === "values" && (
-                     <div className="generate-modal-field">
-                        <label>For dimension:</label>
-                        <select
-                           value={targetColumnForValues}
-                           onChange={(e) => setTargetColumnForValues(e.target.value)}
-                        >
-                           <option value="">Select a dimension...</option>
-                           {data.columns.map((col, idx) => (
-                              <option key={idx} value={col}>{col}</option>
-                           ))}
-                        </select>
-                     </div>
-                  )}
-
-                  <div className="generate-modal-field">
-                     <label>Additional context (optional):</label>
-                     <textarea
-                        value={additionalContext}
-                        onChange={(e) => setAdditionalContext(e.target.value)}
-                        placeholder="Any extra info to guide the AI (constraints, preferences, domain knowledge...)"
-                        rows={3}
-                     />
+               <div className="modal-backdrop" onClick={() => { setShowGenerateModal(null); setGeneratedColumns([]); setGeneratedValues([]); setSelectedGeneratedColumns(new Set()); setSelectedGeneratedValues(new Set()); }} />
+               <div className="modal">
+                  <div className="modal-header">
+                     <h3>{showGenerateModal === "columns" ? "Generate Dimensions" : "Generate Values"}</h3>
+                     <button className="close-btn" onClick={() => { setShowGenerateModal(null); setGeneratedColumns([]); setGeneratedValues([]); }}>×</button>
                   </div>
 
-                  <button
-                     className="generate-btn"
-                     onClick={() => {
-                        if (showGenerateModal === "columns") {
-                           generateNewColumns();
-                        } else if (targetColumnForValues) {
-                           generateNewValues(targetColumnForValues);
-                        }
-                     }}
-                     disabled={generating || (showGenerateModal === "values" && !targetColumnForValues)}
-                  >
-                     {generating ? "Generating..." : "Generate Suggestions"}
-                  </button>
+                  <div className="modal-body">
+                     {showGenerateModal === "values" && (
+                        <div className="field">
+                           <label>For dimension:</label>
+                           <select
+                              value={targetColumnForValues}
+                              onChange={(e) => setTargetColumnForValues(e.target.value)}
+                           >
+                              <option value="">Select...</option>
+                              {data.columns.map((col, idx) => (
+                                 <option key={idx} value={col}>{col}</option>
+                              ))}
+                           </select>
+                        </div>
+                     )}
 
-                  {/* Generated Columns */}
-                  {generatedColumns.length > 0 && (
-                     <div className="generated-items">
-                        <h4>Suggested Dimensions:</h4>
-                        {generatedColumns.map((col, idx) => (
-                           <div key={idx} className="generated-item">
-                              <div className="generated-item-header">
-                                 <strong>{col.name}</strong>
-                                 <button
-                                    className="accept-btn"
-                                    onClick={() => acceptGeneratedColumn(col)}
-                                 >
-                                    Add
+                     <div className="field">
+                        <label>Additional context:</label>
+                        <textarea
+                           value={additionalContext}
+                           onChange={(e) => setAdditionalContext(e.target.value)}
+                           placeholder="Constraints, preferences, domain info..."
+                           rows={2}
+                        />
+                     </div>
+
+                     <button
+                        className="primary-btn"
+                        onClick={() => {
+                           if (showGenerateModal === "columns") {
+                              generateNewColumns();
+                           } else if (targetColumnForValues) {
+                              generateNewValues(targetColumnForValues);
+                           }
+                        }}
+                        disabled={generating || (showGenerateModal === "values" && !targetColumnForValues)}
+                     >
+                        {generating ? "Generating..." : "Generate"}
+                     </button>
+
+                     {/* Generated Columns with checkboxes */}
+                     {generatedColumns.length > 0 && (
+                        <div className="suggestions">
+                           <div className="suggestions-header">
+                              <span>Suggested Dimensions</span>
+                              {selectedGeneratedColumns.size > 0 && (
+                                 <button className="add-selected-btn" onClick={acceptSelectedColumns}>
+                                    Add {selectedGeneratedColumns.size} selected
                                  </button>
-                              </div>
-                              <p className="generated-item-desc">{col.description}</p>
-                              {col.suggestedValues.length > 0 && (
-                                 <div className="generated-item-values">
-                                    Values: {col.suggestedValues.join(", ")}
-                                 </div>
                               )}
                            </div>
-                        ))}
-                     </div>
-                  )}
+                           {generatedColumns.map((col, idx) => (
+                              <label key={idx} className="suggestion-item">
+                                 <input
+                                    type="checkbox"
+                                    checked={selectedGeneratedColumns.has(idx)}
+                                    onChange={(e) => {
+                                       const newSet = new Set(selectedGeneratedColumns);
+                                       if (e.target.checked) newSet.add(idx);
+                                       else newSet.delete(idx);
+                                       setSelectedGeneratedColumns(newSet);
+                                    }}
+                                 />
+                                 <div className="suggestion-content">
+                                    <strong>{col.name}</strong>
+                                    <span className="desc">{col.description}</span>
+                                    {col.suggestedValues.length > 0 && (
+                                       <span className="values">{col.suggestedValues.join(", ")}</span>
+                                    )}
+                                 </div>
+                              </label>
+                           ))}
+                        </div>
+                     )}
 
-                  {/* Generated Values */}
-                  {generatedValues.length > 0 && (
-                     <div className="generated-items">
-                        <h4>Suggested Values for "{targetColumnForValues}":</h4>
-                        {generatedValues.map((val, idx) => (
-                           <div key={idx} className="generated-item">
-                              <div className="generated-item-header">
-                                 <strong>{val.value}</strong>
-                                 <button
-                                    className="accept-btn"
-                                    onClick={() => acceptGeneratedValue(val)}
-                                 >
-                                    Add
+                     {/* Generated Values with checkboxes */}
+                     {generatedValues.length > 0 && (
+                        <div className="suggestions">
+                           <div className="suggestions-header">
+                              <span>Suggested Values for "{targetColumnForValues}"</span>
+                              {selectedGeneratedValues.size > 0 && (
+                                 <button className="add-selected-btn" onClick={acceptSelectedValues}>
+                                    Add {selectedGeneratedValues.size} selected
                                  </button>
-                              </div>
-                              <p className="generated-item-desc">{val.rationale}</p>
+                              )}
                            </div>
-                        ))}
-                     </div>
-                  )}
+                           {generatedValues.map((val, idx) => (
+                              <label key={idx} className="suggestion-item">
+                                 <input
+                                    type="checkbox"
+                                    checked={selectedGeneratedValues.has(idx)}
+                                    onChange={(e) => {
+                                       const newSet = new Set(selectedGeneratedValues);
+                                       if (e.target.checked) newSet.add(idx);
+                                       else newSet.delete(idx);
+                                       setSelectedGeneratedValues(newSet);
+                                    }}
+                                 />
+                                 <div className="suggestion-content">
+                                    <strong>{val.value}</strong>
+                                    <span className="desc">{val.rationale}</span>
+                                 </div>
+                              </label>
+                           ))}
+                        </div>
+                     )}
+                  </div>
                </div>
             </>
          )}
