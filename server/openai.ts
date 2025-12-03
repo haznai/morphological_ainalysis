@@ -293,8 +293,7 @@ Suggest ${count} new dimensions. Be creative but practical.`;
       body: JSON.stringify({
         model: "gpt-5-nano",
         messages,
-        temperature: 0.8, // Higher temperature for creativity
-        max_completion_tokens: 1000,
+        max_completion_tokens: 4000,
         response_format: { type: "json_object" },
       }),
     });
@@ -375,8 +374,7 @@ Suggest ${count} new values. Be creative but relevant to the problem.`;
       body: JSON.stringify({
         model: "gpt-5-nano",
         messages,
-        temperature: 0.8,
-        max_completion_tokens: 800,
+        max_completion_tokens: 2000,
         response_format: { type: "json_object" },
       }),
     });
