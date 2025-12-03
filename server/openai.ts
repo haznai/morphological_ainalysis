@@ -127,10 +127,10 @@ async function evaluateCombination(
         Authorization: `Bearer ${key}`,
       },
       body: JSON.stringify({
-        model: "gpt-5-nano", // Smallest newest model
+        model: "gpt-4o-mini",
         messages,
         temperature: 0.3,
-        max_tokens: 200,
+        max_completion_tokens: 200,
         response_format: { type: "json_object" },
       }),
     });
@@ -294,7 +294,7 @@ Suggest ${count} new dimensions. Be creative but practical.`;
         model: "gpt-5-nano",
         messages,
         temperature: 0.8, // Higher temperature for creativity
-        max_tokens: 1000,
+        max_completion_tokens: 1000,
         response_format: { type: "json_object" },
       }),
     });
@@ -376,7 +376,7 @@ Suggest ${count} new values. Be creative but relevant to the problem.`;
         model: "gpt-5-nano",
         messages,
         temperature: 0.8,
-        max_tokens: 800,
+        max_completion_tokens: 800,
         response_format: { type: "json_object" },
       }),
     });
