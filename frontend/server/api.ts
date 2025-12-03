@@ -14,13 +14,13 @@ export const apiRouter = new Router();
 apiRouter.get("/api/zwicky-box", (ctx) => {
   try {
     const box = getLatestBox();
-    ctx.response.body = box || { 
+    ctx.response.body = box || {
       id: null,
       data: {
         columns: ['Parameter 1', 'Parameter 2'],
         rows: [
-          ['Value 1-1', 'Value 2-1'],
-          ['Value 1-2', 'Value 2-2']
+          ['', ''],
+          ['', '']
         ]
       }
     };

@@ -167,8 +167,8 @@ export function ZwickyBox() {
    const [data, setData] = useState<ZwickyBoxData>({
       columns: ["Parameter 1", "Parameter 2"],
       rows: [
-         ["Value 1-1", "Value 2-1"],
-         ["Value 1-2", "Value 2-2"],
+         ["", ""],
+         ["", ""],
       ],
       problem: "",
    });
