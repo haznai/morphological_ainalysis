@@ -175,6 +175,7 @@ export function ZwickyBox() {
    const [saveStatus, setSaveStatus] = useState<
       "saved" | "saving" | "idle" | "error"
    >("idle");
+   const [isLoaded, setIsLoaded] = useState(false);
    const saveTimeoutRef = useRef<number | null>(null);
    
    // Vim mode state
@@ -195,7 +196,7 @@ export function ZwickyBox() {
    const [redoStack, setRedoStack] = useState<ZwickyBoxData[]>([]);
    const maxUndoStackSize = 50;
 
-   // AI Analysis state
+   // AI Analysis state - key can be set via env var on server or entered here
    const [apiKey, setApiKey] = useState<string>("");
    const [showApiKeyInput, setShowApiKeyInput] = useState(false);
    const [analyzing, setAnalyzing] = useState(false);
@@ -232,16 +233,20 @@ export function ZwickyBox() {
                setBoxId(saved.id);
                setData(saved.data);
             }
+            setIsLoaded(true);
          })
          .catch((error) => {
             console.error("Load error:", error);
             setSaveStatus("error");
             setTimeout(() => setSaveStatus("idle"), 3000);
+            setIsLoaded(true); // Still mark as loaded so user can work
          });
    }, []);
 
-   // Auto-save when data changes
+   // Auto-save when data changes (only after initial load)
    useEffect(() => {
+      if (!isLoaded) return; // Don't save until initial data is loaded
+
       if (saveTimeoutRef.current) {
          clearTimeout(saveTimeoutRef.current);
       }
@@ -282,7 +287,7 @@ export function ZwickyBox() {
             clearTimeout(saveTimeoutRef.current);
          }
       };
-   }, [data, boxId]);
+   }, [data, boxId, isLoaded]);
 
    // Helper to save state for undo
    const saveStateForUndo = () => {
@@ -671,11 +676,6 @@ export function ZwickyBox() {
 
    // AI Analysis functionality
    const runAnalysis = async () => {
-      if (!apiKey) {
-         setShowApiKeyInput(true);
-         return;
-      }
-
       setAnalyzing(true);
       setAnalysisError(null);
       setAnalysisResults(null);
@@ -744,11 +744,6 @@ export function ZwickyBox() {
 
    // AI Generation: suggest new columns
    const generateNewColumns = async () => {
-      if (!apiKey) {
-         setShowApiKeyInput(true);
-         return;
-      }
-
       setGenerating(true);
       setGenerationError(null);
       setGeneratedColumns([]);
@@ -784,11 +779,6 @@ export function ZwickyBox() {
 
    // AI Generation: suggest new values for a column
    const generateNewValues = async (columnName: string) => {
-      if (!apiKey) {
-         setShowApiKeyInput(true);
-         return;
-      }
-
       setGenerating(true);
       setGenerationError(null);
       setGeneratedValues([]);

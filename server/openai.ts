@@ -1,5 +1,10 @@
 // OpenAI API client for Zwicky box combination analysis
 
+// API key can be provided via request or OPENAI_API_KEY env var
+const getApiKey = (requestKey?: string): string => {
+  return requestKey || Deno.env.get("OPENAI_API_KEY") || "";
+};
+
 export interface CombinationEvaluation {
   combination: Record<string, string>; // column name -> value
   verdict: "yes" | "no";
@@ -10,7 +15,7 @@ export interface AnalysisRequest {
   problem: string;
   columns: string[];
   rows: string[][];
-  apiKey: string;
+  apiKey?: string;
 }
 
 interface OpenAIMessage {
@@ -106,8 +111,9 @@ function buildUserPrompt(combination: Record<string, string>): string {
 async function evaluateCombination(
   combination: Record<string, string>,
   systemPrompt: string,
-  apiKey: string
+  apiKey?: string
 ): Promise<CombinationEvaluation> {
+  const key = getApiKey(apiKey);
   const messages: OpenAIMessage[] = [
     { role: "system", content: systemPrompt },
     { role: "user", content: buildUserPrompt(combination) },
@@ -118,7 +124,7 @@ async function evaluateCombination(
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`,
+        Authorization: `Bearer ${key}`,
       },
       body: JSON.stringify({
         model: "gpt-5-nano", // Smallest newest model
@@ -187,7 +193,7 @@ export interface GenerateColumnsRequest {
   rows: string[][];
   additionalContext?: string;
   count?: number;
-  apiKey: string;
+  apiKey?: string;
 }
 
 export interface GenerateValuesRequest {
@@ -197,7 +203,7 @@ export interface GenerateValuesRequest {
   targetColumn: string;
   additionalContext?: string;
   count?: number;
-  apiKey: string;
+  apiKey?: string;
 }
 
 export interface GeneratedColumn {
@@ -239,6 +245,7 @@ export async function generateColumns(
   request: GenerateColumnsRequest
 ): Promise<GeneratedColumn[]> {
   const { problem, existingColumns, rows, additionalContext, count = 3, apiKey } = request;
+  const key = getApiKey(apiKey);
 
   const zwickyContext = buildZwickyContext(problem, existingColumns, rows);
 
@@ -281,7 +288,7 @@ Suggest ${count} new dimensions. Be creative but practical.`;
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`,
+        Authorization: `Bearer ${key}`,
       },
       body: JSON.stringify({
         model: "gpt-5-nano",
@@ -313,6 +320,7 @@ export async function generateValues(
   request: GenerateValuesRequest
 ): Promise<GeneratedValue[]> {
   const { problem, columns, rows, targetColumn, additionalContext, count = 5, apiKey } = request;
+  const key = getApiKey(apiKey);
 
   const zwickyContext = buildZwickyContext(problem, columns, rows);
 
@@ -362,7 +370,7 @@ Suggest ${count} new values. Be creative but relevant to the problem.`;
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`,
+        Authorization: `Bearer ${key}`,
       },
       body: JSON.stringify({
         model: "gpt-5-nano",
