@@ -2,7 +2,7 @@
 
 export interface CombinationEvaluation {
   combination: Record<string, string>; // column name -> value
-  verdict: "yes" | "no" | "promising";
+  verdict: "yes" | "no";
   reasoning: string;
 }
 
@@ -84,14 +84,13 @@ Your task: Evaluate whether a specific combination of values (one from each dime
 
 Respond ONLY with valid JSON in this exact format:
 {
-  "verdict": "yes" | "no" | "promising",
+  "verdict": "yes" | "no",
   "reasoning": "Brief explanation (1-2 sentences)"
 }
 
 Verdicts:
-- "yes": This combination is clearly viable and worth pursuing
-- "no": This combination has fundamental issues or contradictions
-- "promising": This combination has potential but needs further exploration`;
+- "yes": This combination is viable and worth pursuing
+- "no": This combination has issues, contradictions, or is not viable`;
 }
 
 // Build the user prompt for a specific combination
@@ -122,7 +121,7 @@ async function evaluateCombination(
         Authorization: `Bearer ${apiKey}`,
       },
       body: JSON.stringify({
-        model: "gpt-4o-mini", // Smallest newest model
+        model: "gpt-5-nano", // Smallest newest model
         messages,
         temperature: 0.3,
         max_tokens: 200,
@@ -285,7 +284,7 @@ Suggest ${count} new dimensions. Be creative but practical.`;
         Authorization: `Bearer ${apiKey}`,
       },
       body: JSON.stringify({
-        model: "gpt-4o-mini",
+        model: "gpt-5-nano",
         messages,
         temperature: 0.8, // Higher temperature for creativity
         max_tokens: 1000,
@@ -366,7 +365,7 @@ Suggest ${count} new values. Be creative but relevant to the problem.`;
         Authorization: `Bearer ${apiKey}`,
       },
       body: JSON.stringify({
-        model: "gpt-4o-mini",
+        model: "gpt-5-nano",
         messages,
         temperature: 0.8,
         max_tokens: 800,

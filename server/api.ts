@@ -175,7 +175,6 @@ apiRouter.post("/api/analyze", async (ctx) => {
       summary: {
         yes: results.filter(r => r.verdict === "yes").length,
         no: results.filter(r => r.verdict === "no").length,
-        promising: results.filter(r => r.verdict === "promising").length,
       }
     };
   } catch (error) {

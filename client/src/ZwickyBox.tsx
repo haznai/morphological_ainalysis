@@ -3,7 +3,7 @@ import { useState, useEffect, useRef } from "react";
 // AI Analysis types
 interface CombinationEvaluation {
   combination: Record<string, string>;
-  verdict: "yes" | "no" | "promising";
+  verdict: "yes" | "no";
   reasoning: string;
 }
 
@@ -14,7 +14,6 @@ interface AnalysisResult {
   summary: {
     yes: number;
     no: number;
-    promising: number;
   };
   error?: string;
 }
@@ -201,7 +200,7 @@ export function ZwickyBox() {
    const [showApiKeyInput, setShowApiKeyInput] = useState(false);
    const [analyzing, setAnalyzing] = useState(false);
    const [analysisResults, setAnalysisResults] = useState<CombinationEvaluation[] | null>(null);
-   const [analysisSummary, setAnalysisSummary] = useState<{ yes: number; no: number; promising: number } | null>(null);
+   const [analysisSummary, setAnalysisSummary] = useState<{ yes: number; no: number } | null>(null);
    const [analysisError, setAnalysisError] = useState<string | null>(null);
 
    // AI Generation state
@@ -728,23 +727,11 @@ export function ZwickyBox() {
 
       if (matchingEvals.length === 0) return null;
 
-      // Aggregate: if any are promising, show promising; if any yes, show yes; else no
-      const hasPromising = matchingEvals.some((r) => r.verdict === "promising");
+      // Aggregate: if any yes, show yes; else no
       const hasYes = matchingEvals.some((r) => r.verdict === "yes");
-      const allNo = matchingEvals.every((r) => r.verdict === "no");
-
-      if (hasPromising) {
-         const promisingOne = matchingEvals.find((r) => r.verdict === "promising");
-         return promisingOne || matchingEvals[0];
-      }
       if (hasYes) {
-         const yesOne = matchingEvals.find((r) => r.verdict === "yes");
-         return yesOne || matchingEvals[0];
+         return matchingEvals.find((r) => r.verdict === "yes") || matchingEvals[0];
       }
-      if (allNo) {
-         return matchingEvals[0];
-      }
-
       return matchingEvals[0];
    };
 
@@ -984,7 +971,7 @@ export function ZwickyBox() {
    };
 
    // Handle clicking on path badges
-   const handlePathClick = (paths: CombinationEvaluation[], verdict: "yes" | "no" | "promising") => {
+   const handlePathClick = (paths: CombinationEvaluation[], verdict: "yes" | "no") => {
       const filtered = paths.filter((p) => p.verdict === verdict);
       if (filtered.length > 0) {
          setViewingPaths(filtered);
@@ -1060,7 +1047,6 @@ export function ZwickyBox() {
                {data.rows.map((row, rowIndex) => {
                   const rowPaths = getRowPaths(rowIndex);
                   const yesCount = rowPaths.filter((p) => p.verdict === "yes").length;
-                  const promisingCount = rowPaths.filter((p) => p.verdict === "promising").length;
                   const noCount = rowPaths.filter((p) => p.verdict === "no").length;
 
                   return (
@@ -1109,14 +1095,6 @@ export function ZwickyBox() {
                                           {yesCount}
                                        </span>
                                     )}
-                                    {promisingCount > 0 && (
-                                       <span
-                                          className="path-promising clickable"
-                                          onClick={() => handlePathClick(rowPaths, "promising")}
-                                       >
-                                          {promisingCount}
-                                       </span>
-                                    )}
                                     {noCount > 0 && (
                                        <span
                                           className="path-no clickable"
@@ -1137,12 +1115,33 @@ export function ZwickyBox() {
             </tbody>
          </table>
          
-         <VimInfo 
-            vimEnabled={vimEnabled} 
-            mode={mode} 
-            onToggleVim={() => setVimEnabled(!vimEnabled)} 
+         {/* Vim guide - under table, only when vim enabled */}
+         {vimEnabled && (
+            <div className="vim-guide">
+               <div className="section">
+                  <span className="key">h</span><span className="key">j</span><span className="key">k</span><span className="key">l</span> navigate •
+                  <span className="key">i</span><span className="key">a</span> insert •
+                  <span className="key">ESC</span> normal •
+                  <span className="key">/</span> search •
+                  <span className="key">n</span><span className="key">N</span> next/prev
+               </div>
+               <div className="section">
+                  <span className="key">o</span><span className="key">O</span> add row •
+                  <span className="key">dd</span> delete row •
+                  <span className="key">A</span> add column •
+                  <span className="key">dc</span> delete column •
+                  <span className="key">x</span> clear •
+                  <span className="key">u</span> undo
+               </div>
+            </div>
+         )}
+
+         <VimInfo
+            vimEnabled={vimEnabled}
+            mode={mode}
+            onToggleVim={() => setVimEnabled(!vimEnabled)}
          />
-         
+
          {!vimEnabled && (
             <Controls
                onAddColumn={addColumn}
@@ -1170,7 +1169,6 @@ export function ZwickyBox() {
                {analysisSummary && (
                   <>
                      <span className="badge yes">{analysisSummary.yes}</span>
-                     <span className="badge promising">{analysisSummary.promising}</span>
                      <span className="badge no">{analysisSummary.no}</span>
                      <button className="text-btn" onClick={() => { setAnalysisResults(null); setAnalysisSummary(null); }}>
                         clear
@@ -1191,44 +1189,49 @@ export function ZwickyBox() {
             )}
          </div>
 
-         {/* Generation Modal */}
+         {/* Generation Panel - inline */}
          {showGenerateModal && (
-            <>
-               <div className="modal-backdrop" onClick={() => { setShowGenerateModal(null); setGeneratedColumns([]); setGeneratedValues([]); setSelectedGeneratedColumns(new Set()); setSelectedGeneratedValues(new Set()); }} />
-               <div className="modal">
-                  <div className="modal-header">
-                     <h3>{showGenerateModal === "columns" ? "Generate Dimensions" : "Generate Values"}</h3>
-                     <button className="close-btn" onClick={() => { setShowGenerateModal(null); setGeneratedColumns([]); setGeneratedValues([]); }}>×</button>
-                  </div>
+            <div className="generate-panel">
+               <div className="generate-panel-header">
+                  <span className="generate-panel-title">
+                     {showGenerateModal === "columns" ? "Generate Dimensions" : "Generate Values"}
+                  </span>
+                  <button
+                     className="text-btn"
+                     onClick={() => {
+                        setShowGenerateModal(null);
+                        setGeneratedColumns([]);
+                        setGeneratedValues([]);
+                        setSelectedGeneratedColumns(new Set());
+                        setSelectedGeneratedValues(new Set());
+                     }}
+                  >
+                     close
+                  </button>
+               </div>
 
-                  <div className="modal-body">
+               <div className="generate-panel-body">
+                  <div className="generate-controls">
                      {showGenerateModal === "values" && (
-                        <div className="field">
-                           <label>For dimension:</label>
-                           <select
-                              value={targetColumnForValues}
-                              onChange={(e) => setTargetColumnForValues(e.target.value)}
-                           >
-                              <option value="">Select...</option>
-                              {data.columns.map((col, idx) => (
-                                 <option key={idx} value={col}>{col}</option>
-                              ))}
-                           </select>
-                        </div>
+                        <select
+                           value={targetColumnForValues}
+                           onChange={(e) => setTargetColumnForValues(e.target.value)}
+                           className="inline-select"
+                        >
+                           <option value="">Select dimension...</option>
+                           {data.columns.map((col, idx) => (
+                              <option key={idx} value={col}>{col}</option>
+                           ))}
+                        </select>
                      )}
-
-                     <div className="field">
-                        <label>Additional context:</label>
-                        <textarea
-                           value={additionalContext}
-                           onChange={(e) => setAdditionalContext(e.target.value)}
-                           placeholder="Constraints, preferences, domain info..."
-                           rows={2}
-                        />
-                     </div>
-
+                     <input
+                        type="text"
+                        value={additionalContext}
+                        onChange={(e) => setAdditionalContext(e.target.value)}
+                        placeholder="Additional context (optional)"
+                        className="inline-input"
+                     />
                      <button
-                        className="primary-btn"
                         onClick={() => {
                            if (showGenerateModal === "columns") {
                               generateNewColumns();
@@ -1238,78 +1241,60 @@ export function ZwickyBox() {
                         }}
                         disabled={generating || (showGenerateModal === "values" && !targetColumnForValues)}
                      >
-                        {generating ? "Generating..." : "Generate"}
+                        {generating ? "..." : "Generate"}
                      </button>
-
-                     {/* Generated Columns with checkboxes */}
-                     {generatedColumns.length > 0 && (
-                        <div className="suggestions">
-                           <div className="suggestions-header">
-                              <span>Suggested Dimensions</span>
-                              {selectedGeneratedColumns.size > 0 && (
-                                 <button className="add-selected-btn" onClick={acceptSelectedColumns}>
-                                    Add {selectedGeneratedColumns.size} selected
-                                 </button>
-                              )}
-                           </div>
-                           {generatedColumns.map((col, idx) => (
-                              <label key={idx} className="suggestion-item">
-                                 <input
-                                    type="checkbox"
-                                    checked={selectedGeneratedColumns.has(idx)}
-                                    onChange={(e) => {
-                                       const newSet = new Set(selectedGeneratedColumns);
-                                       if (e.target.checked) newSet.add(idx);
-                                       else newSet.delete(idx);
-                                       setSelectedGeneratedColumns(newSet);
-                                    }}
-                                 />
-                                 <div className="suggestion-content">
-                                    <strong>{col.name}</strong>
-                                    <span className="desc">{col.description}</span>
-                                    {col.suggestedValues.length > 0 && (
-                                       <span className="values">{col.suggestedValues.join(", ")}</span>
-                                    )}
-                                 </div>
-                              </label>
-                           ))}
-                        </div>
-                     )}
-
-                     {/* Generated Values with checkboxes */}
-                     {generatedValues.length > 0 && (
-                        <div className="suggestions">
-                           <div className="suggestions-header">
-                              <span>Suggested Values for "{targetColumnForValues}"</span>
-                              {selectedGeneratedValues.size > 0 && (
-                                 <button className="add-selected-btn" onClick={acceptSelectedValues}>
-                                    Add {selectedGeneratedValues.size} selected
-                                 </button>
-                              )}
-                           </div>
-                           {generatedValues.map((val, idx) => (
-                              <label key={idx} className="suggestion-item">
-                                 <input
-                                    type="checkbox"
-                                    checked={selectedGeneratedValues.has(idx)}
-                                    onChange={(e) => {
-                                       const newSet = new Set(selectedGeneratedValues);
-                                       if (e.target.checked) newSet.add(idx);
-                                       else newSet.delete(idx);
-                                       setSelectedGeneratedValues(newSet);
-                                    }}
-                                 />
-                                 <div className="suggestion-content">
-                                    <strong>{val.value}</strong>
-                                    <span className="desc">{val.rationale}</span>
-                                 </div>
-                              </label>
-                           ))}
-                        </div>
-                     )}
                   </div>
+
+                  {/* Suggestions - compact inline list */}
+                  {(generatedColumns.length > 0 || generatedValues.length > 0) && (
+                     <div className="suggestions-inline">
+                        {generatedColumns.map((col, idx) => (
+                           <label key={idx} className="suggestion-chip">
+                              <input
+                                 type="checkbox"
+                                 checked={selectedGeneratedColumns.has(idx)}
+                                 onChange={(e) => {
+                                    const newSet = new Set(selectedGeneratedColumns);
+                                    if (e.target.checked) newSet.add(idx);
+                                    else newSet.delete(idx);
+                                    setSelectedGeneratedColumns(newSet);
+                                 }}
+                              />
+                              <span className="chip-name">{col.name}</span>
+                              <span className="chip-desc">{col.description}</span>
+                           </label>
+                        ))}
+                        {generatedValues.map((val, idx) => (
+                           <label key={idx} className="suggestion-chip">
+                              <input
+                                 type="checkbox"
+                                 checked={selectedGeneratedValues.has(idx)}
+                                 onChange={(e) => {
+                                    const newSet = new Set(selectedGeneratedValues);
+                                    if (e.target.checked) newSet.add(idx);
+                                    else newSet.delete(idx);
+                                    setSelectedGeneratedValues(newSet);
+                                 }}
+                              />
+                              <span className="chip-name">{val.value}</span>
+                              <span className="chip-desc">{val.rationale}</span>
+                           </label>
+                        ))}
+                        {(selectedGeneratedColumns.size > 0 || selectedGeneratedValues.size > 0) && (
+                           <button
+                              className="add-selected-btn"
+                              onClick={() => {
+                                 if (selectedGeneratedColumns.size > 0) acceptSelectedColumns();
+                                 if (selectedGeneratedValues.size > 0) acceptSelectedValues();
+                              }}
+                           >
+                              Add {selectedGeneratedColumns.size + selectedGeneratedValues.size} selected
+                           </button>
+                        )}
+                     </div>
+                  )}
                </div>
-            </>
+            </div>
          )}
 
          {showApiKeyInput && (
@@ -1335,25 +1320,6 @@ export function ZwickyBox() {
             </div>
          )}
 
-         {vimEnabled && (
-            <div className="vim-guide">
-               <div className="section">
-                  <span className="key">h</span><span className="key">j</span><span className="key">k</span><span className="key">l</span> navigate • 
-                  <span className="key">i</span><span className="key">a</span> insert • 
-                  <span className="key">ESC</span> normal • 
-                  <span className="key">/</span> search • 
-                  <span className="key">n</span><span className="key">N</span> next/prev
-               </div>
-               <div className="section">
-                  <span className="key">o</span><span className="key">O</span> add row • 
-                  <span className="key">dd</span> delete row • 
-                  <span className="key">A</span> add column • 
-                  <span className="key">dc</span> delete column • 
-                  <span className="key">x</span> clear • 
-                  <span className="key">u</span> undo
-               </div>
-            </div>
-         )}
 
          {showSearchInput && (
             <div className="search-input-container">
