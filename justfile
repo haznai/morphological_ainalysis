@@ -2,10 +2,6 @@
 default:
    just --list
 
-# local ai model server
-start-model-server:
-	./run_nemotron.py
-
 # frontend Development server
 [working-directory: 'frontend']
 dev:
@@ -33,7 +29,7 @@ reset-db:
 
 # start claude code with preferred settings
 claude:
-   claude --dangerously-skip-permissions --model="sonnet"
+   claude --dangerously-skip-permissions 
 
 format:
-	uvx ruff format
+      uvx ruff format
